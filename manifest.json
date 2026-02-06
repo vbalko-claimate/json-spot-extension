@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "JSON Spot",
-  "version": "0.5.0",
-  "description": "Beautify JSON inside textareas, code editors, and contenteditable elements on any webpage.",
+  "version": "0.7.0",
+  "description": "Beautify JSON and XML inside textareas, code editors, and contenteditable elements on any webpage.",
   "permissions": [
     "contextMenus",
     "activeTab",
@@ -45,13 +45,7 @@
         "default": "Alt+Shift+F",
         "mac": "Alt+Shift+F"
       },
-      "description": "Format JSON in focused element"
+      "description": "Format JSON/XML in focused element"
     }
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["page-script.js"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

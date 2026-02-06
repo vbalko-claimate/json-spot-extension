@@ -1,0 +1,29 @@
+Format and beautify JSON & XML directly inside textareas, code editors, and contenteditable elements on any webpage. No copy-pasting to external tools.
+
+FEATURES
+
+- Auto-detect: A floating button appears when JSON or XML is detected in a focused element
+- Format & Minify: One-click toggle between beautified and compact output
+- Code editor support: Works with Ace, CodeMirror 5/6, and Monaco Editor
+- Element picker: Inspector-like mode to click any element on the page and format its content
+- Syntax highlighting: Picked elements get color-coded JSON/XML output
+- Keyboard shortcut: Alt+Shift+F to format the focused element instantly
+- Context menu: Right-click to format or minify
+- Badge count: Shows how many formattable elements are on the page
+- Configurable indentation: 2 spaces, 4 spaces, or tabs
+- Dark mode: Popup adapts to your system theme
+
+WORKS EVERYWHERE
+
+- Standard textareas (React, Vue, Angular compatible)
+- Contenteditable elements
+- Ace Editor, CodeMirror 5, CodeMirror 6, Monaco Editor
+- Any <pre>, <code>, or <div> element via the picker
+
+PRIVACY
+
+JSON Spot runs entirely in your browser. It does not collect, transmit, or store any data. No analytics, no tracking, no network requests. Your content never leaves your machine.
+
+OPEN SOURCE
+
+Licensed under MIT. Source code available on GitHub.

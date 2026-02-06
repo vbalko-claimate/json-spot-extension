@@ -32,6 +32,7 @@
   let currentButton = null;
   let currentTargetElement = null;
   let currentFormatState = 'format'; // 'format' or 'minify'
+  let currentContentType = 'json'; // 'json' or 'xml'
   let rescanTimer = null;
   let inputDebounceTimers = new WeakMap();
   const dismissedElements = new WeakSet();
@@ -96,6 +97,185 @@
     }
   }
 
+  // ── XML Detection ──────────────────────────────────────
+  function prepareXMLForValidation(text) {
+    // Strip HTML5 doctype (<!DOCTYPE ...>) which is not valid XML
+    // but the document may be well-formed XHTML from XSLT output
+    let xml = text.replace(/^<!DOCTYPE\s+[^>]*>/i, '').trim();
+    // Wrap in dummy root to handle documents with trailing comments/PIs
+    // (e.g. XSLT output: <html>...</html><!--Run with SAXON HE 10.6 -->)
+    // DOMParser requires a single root element
+    return '<_jsonspot_root>' + xml + '</_jsonspot_root>';
+  }
+
+  function isLikelyXML(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.replace(/^\uFEFF/, '').trim();
+    if (trimmed.length === 0 || trimmed.length > JSON_SIZE_LIMIT) return false;
+    if (trimmed[0] !== '<') return false;
+
+    // Try strict XML parsing first (handles proper XML/XHTML)
+    try {
+      const wrapped = prepareXMLForValidation(trimmed);
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(wrapped, 'application/xml');
+      if (!doc.querySelector('parsererror')) return true;
+    } catch {
+      // Fall through to lenient check
+    }
+
+    // Lenient fallback: detect well-formed HTML/XHTML output (e.g. XSLT results)
+    // that isn't strict XML (void elements like <meta>, <br> without self-closing slash).
+    // Must have at least one opening+closing tag pair to distinguish from random text.
+    if (/<[a-zA-Z][^>]*>[\s\S]*<\/[a-zA-Z][^>]*>/.test(trimmed)) {
+      // Exclude plain HTML pages viewed in browser (we only format editor content,
+      // but also avoid false positives on very short fragments)
+      return true;
+    }
+
+    return false;
+  }
+
+  function formatXMLString(xml, indent) {
+    const indentStr = typeof indent === 'number' ? ' '.repeat(indent) : String(indent);
+    // Remove existing whitespace between tags
+    let stripped = xml.replace(/(>)\s+(<)/g, '$1$2');
+    // Tokenize: CDATA, comments, processing instructions, doctype, tags, text
+    const tokens = stripped.match(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|<[^>]+>|[^<]+/gi);
+    if (!tokens) return xml;
+
+    let formatted = '';
+    let depth = 0;
+
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+
+      if (token.startsWith('<?')) {
+        // Processing instruction (e.g. <?xml ...?>)
+        formatted += indentStr.repeat(depth) + token + '\n';
+      } else if (token.startsWith('<!--')) {
+        // Comment
+        formatted += indentStr.repeat(depth) + token + '\n';
+      } else if (token.startsWith('<![CDATA[')) {
+        // CDATA section
+        formatted += indentStr.repeat(depth) + token + '\n';
+      } else if (/^<!DOCTYPE/i.test(token)) {
+        // DOCTYPE declaration (no depth change)
+        formatted += indentStr.repeat(depth) + token + '\n';
+      } else if (token.startsWith('</')) {
+        // Closing tag
+        depth = Math.max(0, depth - 1);
+        formatted += indentStr.repeat(depth) + token + '\n';
+      } else if (token.startsWith('<') && token.endsWith('/>')) {
+        // Self-closing tag
+        formatted += indentStr.repeat(depth) + token + '\n';
+      } else if (token.startsWith('<')) {
+        // Opening tag
+        formatted += indentStr.repeat(depth) + token + '\n';
+        depth++;
+      } else {
+        // Text content
+        const trimmedText = token.trim();
+        if (trimmedText) {
+          formatted += indentStr.repeat(depth) + trimmedText + '\n';
+        }
+      }
+    }
+    return formatted.trimEnd();
+  }
+
+  function minifyXMLString(xml) {
+    return xml
+      .replace(/>\s+</g, '><')
+      .replace(/^\s+|\s+$/g, '')
+      .replace(/\s{2,}/g, ' ');
+  }
+
+  function processXML(text, action, indent) {
+    if (indent === undefined) indent = getIndent();
+    if (!text) return null;
+    const clean = text.replace(/^\uFEFF/, '').trim();
+    // isLikelyXML already validated the content (strict or lenient).
+    // Just format/minify the full original content (including doctype).
+    return action === 'format'
+      ? formatXMLString(clean, indent)
+      : minifyXMLString(clean);
+  }
+
+  // ── Unified Content Detection ──────────────────────────
+  function detectContentType(text) {
+    if (isLikelyJSON(text)) return 'json';
+    if (isLikelyXML(text)) return 'xml';
+    return null;
+  }
+
+  function processContent(text, action, indent) {
+    const type = detectContentType(text);
+    if (type === 'json') return { result: processJSON(text, action, indent), type: 'json' };
+    if (type === 'xml') return { result: processXML(text, action, indent), type: 'xml' };
+    return { result: null, type: null };
+  }
+
+  // ── Syntax Highlighting ───────────────────────────────
+  function escapeHTML(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function highlightJSON(json) {
+    const escaped = escapeHTML(json);
+    return escaped
+      .replace(/(&quot;(?:\\.|[^&])*?&quot;)\s*:/g, '<span class="jsonspot-hl-key">$1</span>:')
+      .replace(/:\s*(&quot;(?:\\.|[^&])*?&quot;)/g, ': <span class="jsonspot-hl-str">$1</span>')
+      .replace(/:\s*(-?\d+\.?\d*(?:[eE][+-]?\d+)?)/g, ': <span class="jsonspot-hl-num">$1</span>')
+      .replace(/:\s*(true|false)/g, ': <span class="jsonspot-hl-bool">$1</span>')
+      .replace(/:\s*(null)/g, ': <span class="jsonspot-hl-null">$1</span>');
+  }
+
+  function highlightXML(xml) {
+    const escaped = escapeHTML(xml);
+    return escaped
+      // Comments
+      .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="jsonspot-hl-comment">$1</span>')
+      // CDATA
+      .replace(/(&lt;!\[CDATA\[[\s\S]*?\]\]&gt;)/g, '<span class="jsonspot-hl-cdata">$1</span>')
+      // Processing instructions
+      .replace(/(&lt;\?[\s\S]*?\?&gt;)/g, '<span class="jsonspot-hl-pi">$1</span>')
+      // Closing tags
+      .replace(/(&lt;\/)([\w:.-]+)(&gt;)/g, '<span class="jsonspot-hl-tag">$1$2$3</span>')
+      // Opening/self-closing tags with attributes
+      .replace(/(&lt;)([\w:.-]+)((?:\s+[\s\S]*?)?)(\/?&gt;)/g, (match, open, tag, attrs, close) => {
+        const highlightedAttrs = attrs.replace(
+          /([\w:.-]+)(\s*=\s*)(&quot;[^&]*?&quot;)/g,
+          '<span class="jsonspot-hl-attr">$1</span>$2<span class="jsonspot-hl-val">$3</span>'
+        );
+        return `<span class="jsonspot-hl-tag">${open}${tag}</span>${highlightedAttrs}<span class="jsonspot-hl-tag">${close}</span>`;
+      });
+  }
+
+  const HIGHLIGHT_STYLES = `
+    .jsonspot-highlighted { white-space: pre; font-family: monospace; line-height: 1.4; }
+    .jsonspot-hl-key { color: #881391; }
+    .jsonspot-hl-str { color: #0B7500; }
+    .jsonspot-hl-num { color: #1A01CC; }
+    .jsonspot-hl-bool, .jsonspot-hl-null { color: #D26B00; }
+    .jsonspot-hl-tag { color: #881391; }
+    .jsonspot-hl-attr { color: #994500; }
+    .jsonspot-hl-val { color: #0B7500; }
+    .jsonspot-hl-comment { color: #708090; }
+    .jsonspot-hl-cdata { color: #994500; }
+    .jsonspot-hl-pi { color: #708090; }
+  `;
+
+  function injectHighlightStyles(el) {
+    if (el.dataset.jsonspotStyled) return;
+    const style = document.createElement('style');
+    style.textContent = HIGHLIGHT_STYLES;
+    // Insert style into parent or the element itself
+    const parent = el.parentElement || el;
+    parent.insertBefore(style, parent.firstChild);
+    el.dataset.jsonspotStyled = '1';
+  }
+
   function getElementText(el) {
     if (el.tagName === 'TEXTAREA') return el.value;
     if (el.isContentEditable) return el.textContent;
@@ -125,22 +305,22 @@
   }
 
   function handleTextarea(textarea, action) {
-    const processed = processJSON(textarea.value, action);
-    if (processed !== null) {
-      setTextareaValue(textarea, processed);
-      return true;
+    const { result, type } = processContent(textarea.value, action);
+    if (result !== null) {
+      setTextareaValue(textarea, result);
+      return type; // 'json' or 'xml'
     }
-    return false;
+    return null;
   }
 
   function handleContentEditable(element, action) {
-    const processed = processJSON(element.textContent, action);
-    if (processed !== null) {
-      element.textContent = processed;
+    const { result, type } = processContent(element.textContent, action);
+    if (result !== null) {
+      element.textContent = result;
       element.dispatchEvent(new Event('input', { bubbles: true }));
-      return true;
+      return type; // 'json' or 'xml'
     }
-    return false;
+    return null;
   }
 
   // ── Editor Detection ───────────────────────────────────
@@ -160,7 +340,7 @@
   }
 
   // ── Action Dispatch ────────────────────────────────────
-  function handleFormatAction(action) {
+  function handleFormatAction(action, showFeedback = false) {
     let el = document.activeElement;
 
     if (!el || el === document.body || el === document.documentElement) {
@@ -176,18 +356,26 @@
     const editorEl = findParentEditor(el);
     if (editorEl) {
       console.log('[JSON Spot] Found parent editor:', editorEl.className);
-      handleEditorViaPageScript(editorEl, action);
+      handleEditorViaPageScript(editorEl, action, showFeedback);
       return;
     }
 
     // Then check standalone textareas/contenteditable
     if (el.tagName === 'TEXTAREA') {
-      if (handleTextarea(el, action)) updateButtonState(el, action);
+      const type = handleTextarea(el, action);
+      if (type) {
+        updateButtonState(el, action, type);
+        if (showFeedback) showNotification(`${type.toUpperCase()} ${action === 'format' ? 'formatted' : 'minified'}`, 'success');
+      }
       return;
     }
 
     if (el.isContentEditable) {
-      if (handleContentEditable(el, action)) updateButtonState(el, action);
+      const type = handleContentEditable(el, action);
+      if (type) {
+        updateButtonState(el, action, type);
+        if (showFeedback) showNotification(`${type.toUpperCase()} ${action === 'format' ? 'formatted' : 'minified'}`, 'success');
+      }
       return;
     }
 
@@ -195,11 +383,19 @@
     if (lastFocusedElement && lastFocusedElement !== el) {
       const lastEditor = findParentEditor(lastFocusedElement);
       if (lastEditor) {
-        handleEditorViaPageScript(lastEditor, action);
+        handleEditorViaPageScript(lastEditor, action, showFeedback);
       } else if (lastFocusedElement.tagName === 'TEXTAREA') {
-        if (handleTextarea(lastFocusedElement, action)) updateButtonState(lastFocusedElement, action);
+        const type = handleTextarea(lastFocusedElement, action);
+        if (type) {
+          updateButtonState(lastFocusedElement, action, type);
+          if (showFeedback) showNotification(`${type.toUpperCase()} ${action === 'format' ? 'formatted' : 'minified'}`, 'success');
+        }
       } else if (lastFocusedElement.isContentEditable) {
-        if (handleContentEditable(lastFocusedElement, action)) updateButtonState(lastFocusedElement, action);
+        const type = handleContentEditable(lastFocusedElement, action);
+        if (type) {
+          updateButtonState(lastFocusedElement, action, type);
+          if (showFeedback) showNotification(`${type.toUpperCase()} ${action === 'format' ? 'formatted' : 'minified'}`, 'success');
+        }
       }
     }
   }
@@ -213,7 +409,7 @@
   // We use window.postMessage which IS the supported cross-world channel.
   // The element is identified via data-jsonspot-id attribute on the DOM.
 
-  function handleEditorViaPageScript(editorEl, action) {
+  function handleEditorViaPageScript(editorEl, action, showFeedback = false) {
     const requestId = ++requestIdCounter;
     const editorType = getElementType(editorEl);
     if (!editorType) {
@@ -230,7 +426,7 @@
       requestId, editorType, action, indent: getIndent()
     }, '*');
 
-    pendingRequests.set(requestId, { element: editorEl, action });
+    pendingRequests.set(requestId, { element: editorEl, action, showFeedback });
     setTimeout(() => {
       if (pendingRequests.has(requestId)) {
         pendingRequests.delete(requestId);
@@ -240,10 +436,10 @@
     }, 3000);
   }
 
-  function checkEditorJSON(editorEl, callback) {
+  function checkEditorContent(editorEl, callback) {
     const requestId = ++requestIdCounter;
     const editorType = getElementType(editorEl);
-    if (!editorType) { callback(false); return; }
+    if (!editorType) { callback(null); return; }
 
     editorEl.dataset.jsonspotId = String(requestId);
 
@@ -257,7 +453,7 @@
     setTimeout(() => {
       if (pendingRequests.has(requestId)) {
         pendingRequests.delete(requestId);
-        callback(false);
+        callback(null);
       }
     }, 3000);
   }
@@ -268,27 +464,30 @@
     if (!msg || msg.source !== 'jsonspot-page') return;
 
     if (msg.type === 'jsonspot-response') {
-      const { requestId, success, error } = msg;
-      console.log('[JSON Spot] Response received:', { requestId, success, error });
+      const { requestId, success, error, contentType } = msg;
+      console.log('[JSON Spot] Response received:', { requestId, success, error, contentType });
       const pending = pendingRequests.get(requestId);
       if (!pending) return;
       pendingRequests.delete(requestId);
 
       if (success && pending.element) {
-        updateButtonState(pending.element, pending.action);
+        updateButtonState(pending.element, pending.action, contentType);
+        if (pending.showFeedback && contentType) {
+          showNotification(`${contentType.toUpperCase()} ${pending.action === 'format' ? 'formatted' : 'minified'}`, 'success');
+        }
       } else if (error) {
         showNotification(error);
       }
     }
 
     if (msg.type === 'jsonspot-check-response') {
-      const { requestId, isJSON } = msg;
+      const { requestId, contentType } = msg;
       const pending = pendingRequests.get(requestId);
       if (!pending) return;
       pendingRequests.delete(requestId);
 
       if (pending.callback) {
-        pending.callback(isJSON);
+        pending.callback(contentType);
       }
     }
   });
@@ -360,6 +559,21 @@
       .jsonspot-notification.success {
         background: #4CAF50;
       }
+      .jsonspot-notification-action {
+        margin-left: 8px;
+        background: rgba(255,255,255,0.2);
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 3px;
+        padding: 1px 6px;
+        font-size: 10px;
+        font-family: inherit;
+        cursor: pointer;
+        line-height: 1.4;
+      }
+      .jsonspot-notification-action:hover {
+        background: rgba(255,255,255,0.35);
+      }
       .jsonspot-picker-overlay {
         position: fixed;
         top: 0;
@@ -411,7 +625,11 @@
     shadowRoot.appendChild(style);
   }
 
-  function showFloatingButton(targetElement, type) {
+  function contentTypeIcon(contentType) {
+    return contentType === 'xml' ? '&lt;/&gt;' : '{ }';
+  }
+
+  function showFloatingButton(targetElement, type, contentType) {
     if (dismissedElements.has(targetElement)) return;
     if (currentTargetElement === targetElement && currentButton) {
       repositionButton();
@@ -425,10 +643,12 @@
 
     currentTargetElement = targetElement;
     currentFormatState = 'format';
+    currentContentType = contentType || 'json';
 
     const btn = document.createElement('button');
     btn.className = 'jsonspot-btn';
-    btn.innerHTML = '{ } Format <span class="jsonspot-dismiss">✕</span>';
+    const icon = contentTypeIcon(currentContentType);
+    btn.innerHTML = `${icon} Format <span class="jsonspot-dismiss">✕</span>`;
 
     positionButton(btn, rect);
 
@@ -436,19 +656,16 @@
       e.stopPropagation();
       e.preventDefault();
       const action = currentFormatState;
-      let success = false;
 
       if (type === 'textarea') {
-        success = handleTextarea(targetElement, action);
+        const resultType = handleTextarea(targetElement, action);
+        if (resultType) updateButtonState(targetElement, action, resultType);
       } else if (type === 'contenteditable') {
-        success = handleContentEditable(targetElement, action);
+        const resultType = handleContentEditable(targetElement, action);
+        if (resultType) updateButtonState(targetElement, action, resultType);
       } else {
         handleEditorViaPageScript(targetElement, action);
         return;
-      }
-
-      if (success) {
-        updateButtonState(targetElement, action);
       }
     });
 
@@ -487,16 +704,19 @@
     currentButton = null;
     currentTargetElement = null;
     currentFormatState = 'format';
+    currentContentType = 'json';
   }
 
-  function updateButtonState(el, lastAction) {
+  function updateButtonState(el, lastAction, contentType) {
     if (currentTargetElement !== el || !currentButton) return;
+    if (contentType) currentContentType = contentType;
+    const icon = contentTypeIcon(currentContentType);
     if (lastAction === 'format') {
       currentFormatState = 'minify';
-      currentButton.innerHTML = '{ } Minify <span class="jsonspot-dismiss">✕</span>';
+      currentButton.innerHTML = `${icon} Minify <span class="jsonspot-dismiss">✕</span>`;
     } else {
       currentFormatState = 'format';
-      currentButton.innerHTML = '{ } Format <span class="jsonspot-dismiss">✕</span>';
+      currentButton.innerHTML = `${icon} Format <span class="jsonspot-dismiss">✕</span>`;
     }
     // Re-attach dismiss handler
     const dismissBtn = currentButton.querySelector('.jsonspot-dismiss');
@@ -510,13 +730,43 @@
     }
   }
 
-  function showNotification(message, type = 'error') {
+  function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).catch(() => {
+      // Fallback for older browsers
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    });
+  }
+
+  function showNotification(message, type = 'error', actions = []) {
     if (!shadowRoot) return;
     const note = document.createElement('div');
     note.className = 'jsonspot-notification' + (type === 'success' ? ' success' : '');
-    note.textContent = message;
     note.style.top = '10px';
     note.style.right = '10px';
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = message;
+    note.appendChild(textSpan);
+
+    actions.forEach(({ label, onClick }) => {
+      const btn = document.createElement('button');
+      btn.className = 'jsonspot-notification-action';
+      btn.textContent = label;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onClick();
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = label, 1000);
+      });
+      note.appendChild(btn);
+    });
+
     shadowRoot.appendChild(note);
     setTimeout(() => note.remove(), 3000);
   }
@@ -532,16 +782,17 @@
 
     if (type === 'textarea' || type === 'contenteditable') {
       const text = getElementText(el);
-      if (isLikelyJSON(text)) {
-        showFloatingButton(el, type);
+      const contentType = detectContentType(text);
+      if (contentType) {
+        showFloatingButton(el, type, contentType);
       } else {
         if (currentTargetElement === el) removeFloatingButton();
       }
     } else {
       // Code editor: ask page script to check
-      checkEditorJSON(el, (isJSON) => {
-        if (isJSON) {
-          showFloatingButton(el, type);
+      checkEditorContent(el, (contentType) => {
+        if (contentType) {
+          showFloatingButton(el, type, contentType);
         } else if (currentTargetElement === el) {
           removeFloatingButton();
         }
@@ -549,7 +800,7 @@
     }
   }
 
-  function scanForJSONElements() {
+  function scanForElements() {
     if (!shadowRoot) return;
 
     // Scan textareas (skip editor-internal ones like Ace's ace_text-input)
@@ -558,10 +809,11 @@
       if (findParentEditor(el)) return;
       trackTextareaInput(el);
       if (dismissedElements.has(el)) return;
-      if (isLikelyJSON(el.value)) {
+      const contentType = detectContentType(el.value);
+      if (contentType) {
         // Only show button for the focused one
         if (el === lastFocusedElement || el === document.activeElement) {
-          showFloatingButton(el, 'textarea');
+          showFloatingButton(el, 'textarea', contentType);
         }
       }
     });
@@ -569,9 +821,10 @@
     // Scan contenteditable
     document.querySelectorAll('[contenteditable="true"]').forEach(el => {
       if (dismissedElements.has(el)) return;
-      if (isLikelyJSON(el.textContent)) {
+      const contentType = detectContentType(el.textContent);
+      if (contentType) {
         if (el === lastFocusedElement || el === document.activeElement) {
-          showFloatingButton(el, 'contenteditable');
+          showFloatingButton(el, 'contenteditable', contentType);
         }
       }
     });
@@ -609,7 +862,7 @@
     if (rescanTimer) clearTimeout(rescanTimer);
     rescanTimer = setTimeout(() => {
       rescanTimer = null;
-      scanForJSONElements();
+      scanForElements();
     }, SCAN_DEBOUNCE_MS);
   }
 
@@ -654,10 +907,10 @@
     document.querySelectorAll('textarea').forEach(el => {
       if (el.classList.contains('ace_text-input')) return;
       if (findParentEditor(el)) return;
-      if (isLikelyJSON(el.value)) count++;
+      if (detectContentType(el.value)) count++;
     });
     document.querySelectorAll('[contenteditable="true"]').forEach(el => {
-      if (isLikelyJSON(el.textContent)) count++;
+      if (detectContentType(el.textContent)) count++;
     });
     // Code editors are counted by class presence (we can't synchronously check their content)
     count += document.querySelectorAll('.CodeMirror, .cm-editor, .monaco-editor, .ace_editor').length;
@@ -672,19 +925,19 @@
   // ── Highlight Animation ─────────────────────────────────
   const HIGHLIGHT_DURATION_MS = 3000;
 
-  function collectJSONElements() {
+  function collectFormattableElements() {
     const results = [];
 
     // Textareas (skip editor-internal)
     document.querySelectorAll('textarea').forEach(el => {
       if (el.classList.contains('ace_text-input')) return;
       if (findParentEditor(el)) return;
-      if (isLikelyJSON(el.value)) results.push(el);
+      if (detectContentType(el.value)) results.push(el);
     });
 
     // Contenteditable
     document.querySelectorAll('[contenteditable="true"]').forEach(el => {
-      if (isLikelyJSON(el.textContent)) results.push(el);
+      if (detectContentType(el.textContent)) results.push(el);
     });
 
     // Code editors (counted by presence — same heuristic as badge)
@@ -695,8 +948,8 @@
     return results;
   }
 
-  function highlightJSONElements() {
-    const elements = collectJSONElements();
+  function highlightElements() {
+    const elements = collectFormattableElements();
     elements.forEach((el, i) => applyHighlight(el, i === 0));
     return elements.length;
   }
@@ -754,7 +1007,7 @@
     // Create hint bar at bottom
     const pickerHint = document.createElement('div');
     pickerHint.className = 'jsonspot-picker-hint';
-    pickerHint.textContent = 'Click an element containing JSON \u00b7 Esc to cancel';
+    pickerHint.textContent = 'Click an element containing JSON or XML \u00b7 Esc to cancel';
     shadowRoot.appendChild(pickerHint);
 
     // Mousemove: find element under cursor, highlight it
@@ -849,13 +1102,13 @@
       current = current.parentElement;
     }
 
-    // Priority 4: Walk up to find a text-bearing element with JSON-like content
+    // Priority 4: Walk up to find a text-bearing element with JSON/XML-like content
     current = el;
     while (current && current !== document.body) {
       const text = current.textContent?.trim();
       if (text && text.length > 1 && text.length < JSON_SIZE_LIMIT) {
         const firstChar = text[0];
-        if (firstChar === '{' || firstChar === '[') {
+        if (firstChar === '{' || firstChar === '[' || firstChar === '<') {
           return current;
         }
       }
@@ -899,36 +1152,40 @@
 
     // Case 2: Textarea
     if (el.tagName === 'TEXTAREA') {
-      if (handleTextarea(el, 'format')) {
-        showNotification('JSON formatted', 'success');
+      const type = handleTextarea(el, 'format');
+      if (type) {
+        showNotification(`${type.toUpperCase()} formatted`, 'success');
       } else {
-        showNotification('No valid JSON found in this element');
+        showNotification('No valid JSON or XML found in this element');
       }
       return;
     }
 
     // Case 3: Contenteditable
     if (el.isContentEditable) {
-      if (handleContentEditable(el, 'format')) {
-        showNotification('JSON formatted', 'success');
+      const type = handleContentEditable(el, 'format');
+      if (type) {
+        showNotification(`${type.toUpperCase()} formatted`, 'success');
       } else {
-        showNotification('No valid JSON found in this element');
+        showNotification('No valid JSON or XML found in this element');
       }
       return;
     }
 
     // Case 4: Arbitrary element (<pre>, <code>, <div>, etc.)
     const text = el.textContent;
-    if (text && isLikelyJSON(text)) {
-      const formatted = processJSON(text, 'format');
-      if (formatted !== null) {
-        el.textContent = formatted;
-        showNotification('JSON formatted', 'success');
-        return;
-      }
+    const { result, type } = processContent(text, 'format');
+    if (result !== null) {
+      injectHighlightStyles(el);
+      el.classList.add('jsonspot-highlighted');
+      el.innerHTML = type === 'json' ? highlightJSON(result) : highlightXML(result);
+      showNotification(`${type.toUpperCase()} formatted`, 'success', [
+        { label: 'Copy', onClick: () => copyToClipboard(result) }
+      ]);
+      return;
     }
 
-    showNotification('No valid JSON found in this element');
+    showNotification('No valid JSON or XML found in this element');
   }
 
   // ── Message Listener ───────────────────────────────────
@@ -938,7 +1195,7 @@
       return;
     }
     if (message.type === 'JSONSPOT_HIGHLIGHT') {
-      const count = highlightJSONElements();
+      const count = highlightElements();
       sendResponse({ count });
       return;
     }
@@ -948,7 +1205,7 @@
       return;
     }
     if (message.type === 'JSONSPOT_CONTEXT_MENU' || message.type === 'JSONSPOT_KEYBOARD_SHORTCUT') {
-      handleFormatAction(message.action);
+      handleFormatAction(message.action, true);
     }
   });
 
@@ -956,7 +1213,7 @@
   function init() {
     if (!document.body) return;
     initFloatingButton();
-    scanForJSONElements();
+    scanForElements();
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('scroll', onScrollOrResize, { passive: true, capture: true });
     window.addEventListener('resize', onScrollOrResize, { passive: true });

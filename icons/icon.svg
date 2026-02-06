@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Flat rounded square background — Material Green 500 -->
+  <rect width="128" height="128" rx="28" fill="#4CAF50"/>
+
+  <!-- Left curly brace { — bolder, wider for small-size clarity -->
+  <path d="M 52 26
+           C 38 26, 38 36, 38 44
+           C 38 52, 38 56, 28 60
+           C 24 62, 22 63, 22 64
+           C 22 65, 24 66, 28 68
+           C 38 72, 38 76, 38 84
+           C 38 92, 38 102, 52 102"
+        fill="none" stroke="white" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Right curly brace } -->
+  <path d="M 76 26
+           C 90 26, 90 36, 90 44
+           C 90 52, 90 56, 100 60
+           C 104 62, 106 63, 106 64
+           C 106 65, 104 66, 100 68
+           C 90 72, 90 76, 90 84
+           C 90 92, 90 102, 76 102"
+        fill="none" stroke="white" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Center dot — larger for visibility at small sizes -->
+  <circle cx="64" cy="64" r="6" fill="white"/>
+</svg>

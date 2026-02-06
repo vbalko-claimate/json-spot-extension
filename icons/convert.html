@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head><title>Icon Converter</title></head>
+<body style="background:#f5f5f5;font-family:system-ui;padding:20px;">
+<h2>JSON Spot Icon — SVG to PNG</h2>
+<p>Click each "Download" link to save the PNG file, then move it to the icons folder.</p>
+<div id="previews" style="display:flex;gap:40px;align-items:flex-end;"></div>
+<script>
+const svgText = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="28" fill="#4CAF50"/>
+  <path d="M 52 26 C 38 26, 38 36, 38 44 C 38 52, 38 56, 28 60 C 24 62, 22 63, 22 64 C 22 65, 24 66, 28 68 C 38 72, 38 76, 38 84 C 38 92, 38 102, 52 102" fill="none" stroke="white" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 76 26 C 90 26, 90 36, 90 44 C 90 52, 90 56, 100 60 C 104 62, 106 63, 106 64 C 106 65, 104 66, 100 68 C 90 72, 90 76, 90 84 C 90 92, 90 102, 76 102" fill="none" stroke="white" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="64" cy="64" r="6" fill="white"/>
+</svg>`;
+
+const sizes = [16, 32, 48, 128];
+const container = document.getElementById('previews');
+
+sizes.forEach(size => {
+  // Supersample: render at 4x then scale down for crisp small icons
+  const renderSize = size * 4;
+  const bigCanvas = document.createElement('canvas');
+  bigCanvas.width = renderSize;
+  bigCanvas.height = renderSize;
+  const bigCtx = bigCanvas.getContext('2d');
+
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  const img = new Image();
+  const blob = new Blob([svgText], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+
+  img.onload = () => {
+    // Draw at 4x size
+    bigCtx.drawImage(img, 0, 0, renderSize, renderSize);
+    URL.revokeObjectURL(url);
+
+    // Scale down with high-quality interpolation
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bigCanvas, 0, 0, renderSize, renderSize, 0, 0, size, size);
+
+    const div = document.createElement('div');
+    div.style.cssText = 'text-align:center;';
+
+    const label = document.createElement('p');
+    label.textContent = size + ' x ' + size;
+    label.style.fontWeight = 'bold';
+
+    const preview = document.createElement('img');
+    preview.src = canvas.toDataURL('image/png');
+    const displaySize = Math.max(size * 2, 64);
+    preview.style.cssText = 'border:1px solid #ddd;border-radius:8px;width:' + displaySize + 'px;height:' + displaySize + 'px;image-rendering:auto;background:white;padding:8px;';
+
+    const link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = 'icon-' + size + '.png';
+    link.textContent = 'Download icon-' + size + '.png';
+    link.style.cssText = 'display:block;margin-top:8px;color:#4CAF50;font-weight:500;';
+
+    div.appendChild(label);
+    div.appendChild(preview);
+    div.appendChild(link);
+    container.appendChild(div);
+  };
+
+  img.src = url;
+});
+</script>
+</body>
+</html>

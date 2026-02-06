@@ -70,10 +70,10 @@
         if (response && response.count > 0) {
           highlightBtn.textContent = `Highlighted ${response.count} element${response.count > 1 ? 's' : ''}`;
         } else {
-          highlightBtn.textContent = 'No JSON found';
+          highlightBtn.textContent = 'No JSON or XML found';
         }
         setTimeout(() => {
-          highlightBtn.innerHTML = '<span class="action-icon">&#9673;</span> Highlight JSON';
+          highlightBtn.innerHTML = '<span class="action-icon">&#9673;</span> Highlight Elements';
         }, 2000);
       })
       .catch(() => {

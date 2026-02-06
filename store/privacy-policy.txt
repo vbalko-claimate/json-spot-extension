@@ -1,0 +1,41 @@
+Privacy Policy for JSON Spot
+
+Last updated: February 6, 2026
+
+JSON Spot is a browser extension that formats and beautifies JSON and XML content within web page elements. This privacy policy explains how the extension handles user data.
+
+DATA COLLECTION
+
+JSON Spot does not collect, store, or transmit any user data. The extension:
+
+- Does NOT collect any personally identifiable information
+- Does NOT track browsing history or activity
+- Does NOT make any network requests
+- Does NOT use analytics or telemetry
+- Does NOT use cookies or local storage for tracking purposes
+
+HOW THE EXTENSION WORKS
+
+All processing happens entirely within your browser. When you format or minify JSON/XML content, the extension reads the text from the focused element, processes it locally using built-in JavaScript functions, and writes the formatted result back to the same element. No data ever leaves your browser.
+
+The only browser storage used is chrome.storage.sync for saving your preferences (indentation setting and auto-detect toggle). These settings are synced through your Chrome profile, not through any third-party service.
+
+PERMISSIONS
+
+The extension requests the following permissions:
+
+- contextMenus: To add "Format JSON / XML" and "Minify JSON / XML" to the right-click menu
+- activeTab: To access the content of the currently active tab when you use the extension
+- storage: To save your indentation and auto-detect preferences
+
+THIRD-PARTY SERVICES
+
+JSON Spot does not integrate with or send data to any third-party services.
+
+CHANGES TO THIS POLICY
+
+If this privacy policy changes, the updated version will be published alongside the extension update.
+
+CONTACT
+
+For questions about this privacy policy, please open an issue on the project's GitHub repository.

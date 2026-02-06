@@ -1,13 +1,13 @@
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'jsonspot-format',
-    title: 'Format JSON',
+    title: 'Format JSON / XML',
     contexts: ['editable', 'page']
   });
 
   chrome.contextMenus.create({
     id: 'jsonspot-minify',
-    title: 'Minify JSON',
+    title: 'Minify JSON / XML',
     contexts: ['editable', 'page']
   });
 });
