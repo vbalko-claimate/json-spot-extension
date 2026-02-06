@@ -208,6 +208,11 @@
   let requestIdCounter = 0;
   const pendingRequests = new Map();
 
+  // NOTE: CustomEvent.detail does NOT cross world boundaries in Chrome MV3.
+  // We pass data via data-* attributes on the target element instead.
+  // Content script (ISOLATED) writes data-jsonspot-request, dispatches bare event.
+  // Page script (MAIN) reads it, writes data-jsonspot-response, dispatches bare event.
+
   function handleEditorViaPageScript(editorEl, action) {
     const requestId = ++requestIdCounter;
     const editorType = getElementType(editorEl);
@@ -216,12 +221,13 @@
       return;
     }
 
-    editorEl.dataset.jsonspotId = requestId;
+    // Write request params to dataset (readable cross-world)
+    editorEl.dataset.jsonspotRequest = JSON.stringify({
+      requestId, editorType, action, indent: getIndent()
+    });
     console.log('[JSON Spot] Sending request:', { requestId, editorType, action });
 
-    document.dispatchEvent(new CustomEvent('jsonspot-request', {
-      detail: { requestId, editorType, action, indent: getIndent() }
-    }));
+    document.dispatchEvent(new CustomEvent('jsonspot-request'));
 
     pendingRequests.set(requestId, { element: editorEl, action });
     setTimeout(() => {
@@ -238,11 +244,10 @@
     const editorType = getElementType(editorEl);
     if (!editorType) { callback(false); return; }
 
-    editorEl.dataset.jsonspotId = requestId;
+    // Write check params to dataset
+    editorEl.dataset.jsonspotCheck = JSON.stringify({ requestId, editorType });
 
-    document.dispatchEvent(new CustomEvent('jsonspot-check', {
-      detail: { requestId, editorType }
-    }));
+    document.dispatchEvent(new CustomEvent('jsonspot-check'));
 
     pendingRequests.set(requestId, { callback });
     setTimeout(() => {
@@ -253,8 +258,20 @@
     }, 3000);
   }
 
-  document.addEventListener('jsonspot-response', (event) => {
-    const { requestId, success, error } = event.detail;
+  document.addEventListener('jsonspot-response', () => {
+    // Read response from the element's dataset
+    const el = document.querySelector('[data-jsonspot-response]');
+    if (!el) return;
+
+    let data;
+    try {
+      data = JSON.parse(el.dataset.jsonspotResponse);
+    } catch {
+      return;
+    }
+    delete el.dataset.jsonspotResponse;
+
+    const { requestId, success, error } = data;
     console.log('[JSON Spot] Response received:', { requestId, success, error });
     const pending = pendingRequests.get(requestId);
     if (!pending) return;
@@ -267,8 +284,19 @@
     }
   });
 
-  document.addEventListener('jsonspot-check-response', (event) => {
-    const { requestId, isJSON } = event.detail;
+  document.addEventListener('jsonspot-check-response', () => {
+    const el = document.querySelector('[data-jsonspot-check-response]');
+    if (!el) return;
+
+    let data;
+    try {
+      data = JSON.parse(el.dataset.jsonspotCheckResponse);
+    } catch {
+      return;
+    }
+    delete el.dataset.jsonspotCheckResponse;
+
+    const { requestId, isJSON } = data;
     const pending = pendingRequests.get(requestId);
     if (!pending) return;
     pendingRequests.delete(requestId);
