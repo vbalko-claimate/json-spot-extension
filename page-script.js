@@ -118,71 +118,59 @@
     return { success: true };
   }
 
-  // ── Event Listeners ────────────────────────────────────
-  // NOTE: CustomEvent.detail does NOT cross world boundaries in Chrome MV3.
-  // The content script (ISOLATED world) sends requests by setting data-*
-  // attributes on the target element and dispatching a bare CustomEvent.
-  // The page script (MAIN world) reads data from data-* attributes,
-  // writes results back to data-* attributes, and dispatches a bare event.
+  // ── Message Listener ───────────────────────────────────
+  // Uses window.postMessage for cross-world communication (MAIN <-> ISOLATED).
+  // The element is identified via data-jsonspot-id attribute on the DOM.
 
-  document.addEventListener('jsonspot-request', (event) => {
-    // Read request params from the element's dataset
-    const el = document.querySelector('[data-jsonspot-request]');
-    if (!el) return;
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const msg = event.data;
+    if (!msg || msg.source !== 'jsonspot-content') return;
 
-    let params;
-    try {
-      params = JSON.parse(el.dataset.jsonspotRequest);
-    } catch {
-      return;
-    }
-    // Clear the request data
-    delete el.dataset.jsonspotRequest;
+    if (msg.type === 'jsonspot-request') {
+      const { requestId, editorType, action, indent } = msg;
+      console.log('[JSON Spot] Request received:', { requestId, editorType, action, indent });
+      let result;
 
-    const { requestId, editorType, action, indent } = params;
-    console.log('[JSON Spot] Request received:', { requestId, editorType, action, indent });
-    let result;
+      try {
+        const el = document.querySelector(`[data-jsonspot-id="${requestId}"]`);
+        if (!el) throw new Error('Element not found');
+        console.log('[JSON Spot] Found element:', el.tagName, el.className);
+        result = handleEditor(el, editorType, action, indent || 2);
+        console.log('[JSON Spot] Result:', result.success ? 'success' : 'failed', result.error || '');
+      } catch (err) {
+        console.log('[JSON Spot] Error:', err.message);
+        result = { success: false, error: err.message };
+      }
 
-    try {
-      console.log('[JSON Spot] Found element:', el.tagName, el.className);
-      result = handleEditor(el, editorType, action, indent || 2);
-      console.log('[JSON Spot] Result:', result.success ? 'success' : 'failed', result.error || '');
-    } catch (err) {
-      console.log('[JSON Spot] Error:', err.message);
-      result = { success: false, error: err.message };
+      window.postMessage({
+        source: 'jsonspot-page',
+        type: 'jsonspot-response',
+        requestId, ...result
+      }, '*');
     }
 
-    // Write result to dataset and dispatch response event
-    el.dataset.jsonspotResponse = JSON.stringify({ requestId, ...result });
-    document.dispatchEvent(new CustomEvent('jsonspot-response'));
-  });
+    if (msg.type === 'jsonspot-check') {
+      const { requestId, editorType } = msg;
+      console.log('[JSON Spot] Check received:', { requestId, editorType });
+      let result;
 
-  document.addEventListener('jsonspot-check', (event) => {
-    const el = document.querySelector('[data-jsonspot-check]');
-    if (!el) return;
+      try {
+        const el = document.querySelector(`[data-jsonspot-id="${requestId}"]`);
+        if (!el) throw new Error('Element not found');
+        const value = getEditorValue(el, editorType);
+        result = { isJSON: isLikelyJSON(value) };
+        console.log('[JSON Spot] Check result: isJSON =', result.isJSON, 'valueLength =', value?.length);
+      } catch (err) {
+        console.log('[JSON Spot] Check error:', err.message);
+        result = { isJSON: false };
+      }
 
-    let params;
-    try {
-      params = JSON.parse(el.dataset.jsonspotCheck);
-    } catch {
-      return;
+      window.postMessage({
+        source: 'jsonspot-page',
+        type: 'jsonspot-check-response',
+        requestId, ...result
+      }, '*');
     }
-    delete el.dataset.jsonspotCheck;
-
-    const { requestId, editorType } = params;
-    console.log('[JSON Spot] Check received:', { requestId, editorType });
-    let result;
-
-    try {
-      const value = getEditorValue(el, editorType);
-      result = { success: true, isJSON: isLikelyJSON(value) };
-      console.log('[JSON Spot] Check result: isJSON =', result.isJSON, 'valueLength =', value?.length);
-    } catch (err) {
-      console.log('[JSON Spot] Check error:', err.message);
-      result = { success: false, isJSON: false };
-    }
-
-    el.dataset.jsonspotCheckResponse = JSON.stringify({ requestId, ...result });
-    document.dispatchEvent(new CustomEvent('jsonspot-check-response'));
   });
 })();

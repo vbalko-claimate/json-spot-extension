@@ -208,10 +208,10 @@
   let requestIdCounter = 0;
   const pendingRequests = new Map();
 
-  // NOTE: CustomEvent.detail does NOT cross world boundaries in Chrome MV3.
-  // We pass data via data-* attributes on the target element instead.
-  // Content script (ISOLATED) writes data-jsonspot-request, dispatches bare event.
-  // Page script (MAIN) reads it, writes data-jsonspot-response, dispatches bare event.
+  // NOTE: Neither CustomEvent.detail nor dataset attributes cross the
+  // MAIN/ISOLATED world boundary reliably in Chrome MV3.
+  // We use window.postMessage which IS the supported cross-world channel.
+  // The element is identified via data-jsonspot-id attribute on the DOM.
 
   function handleEditorViaPageScript(editorEl, action) {
     const requestId = ++requestIdCounter;
@@ -221,13 +221,14 @@
       return;
     }
 
-    // Write request params to dataset (readable cross-world)
-    editorEl.dataset.jsonspotRequest = JSON.stringify({
-      requestId, editorType, action, indent: getIndent()
-    });
+    editorEl.dataset.jsonspotId = String(requestId);
     console.log('[JSON Spot] Sending request:', { requestId, editorType, action });
 
-    document.dispatchEvent(new CustomEvent('jsonspot-request'));
+    window.postMessage({
+      source: 'jsonspot-content',
+      type: 'jsonspot-request',
+      requestId, editorType, action, indent: getIndent()
+    }, '*');
 
     pendingRequests.set(requestId, { element: editorEl, action });
     setTimeout(() => {
@@ -244,10 +245,13 @@
     const editorType = getElementType(editorEl);
     if (!editorType) { callback(false); return; }
 
-    // Write check params to dataset
-    editorEl.dataset.jsonspotCheck = JSON.stringify({ requestId, editorType });
+    editorEl.dataset.jsonspotId = String(requestId);
 
-    document.dispatchEvent(new CustomEvent('jsonspot-check'));
+    window.postMessage({
+      source: 'jsonspot-content',
+      type: 'jsonspot-check',
+      requestId, editorType
+    }, '*');
 
     pendingRequests.set(requestId, { callback });
     setTimeout(() => {
@@ -258,51 +262,34 @@
     }, 3000);
   }
 
-  document.addEventListener('jsonspot-response', () => {
-    // Read response from the element's dataset
-    const el = document.querySelector('[data-jsonspot-response]');
-    if (!el) return;
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const msg = event.data;
+    if (!msg || msg.source !== 'jsonspot-page') return;
 
-    let data;
-    try {
-      data = JSON.parse(el.dataset.jsonspotResponse);
-    } catch {
-      return;
+    if (msg.type === 'jsonspot-response') {
+      const { requestId, success, error } = msg;
+      console.log('[JSON Spot] Response received:', { requestId, success, error });
+      const pending = pendingRequests.get(requestId);
+      if (!pending) return;
+      pendingRequests.delete(requestId);
+
+      if (success && pending.element) {
+        updateButtonState(pending.element, pending.action);
+      } else if (error) {
+        showNotification(error);
+      }
     }
-    delete el.dataset.jsonspotResponse;
 
-    const { requestId, success, error } = data;
-    console.log('[JSON Spot] Response received:', { requestId, success, error });
-    const pending = pendingRequests.get(requestId);
-    if (!pending) return;
-    pendingRequests.delete(requestId);
+    if (msg.type === 'jsonspot-check-response') {
+      const { requestId, isJSON } = msg;
+      const pending = pendingRequests.get(requestId);
+      if (!pending) return;
+      pendingRequests.delete(requestId);
 
-    if (success && pending.element) {
-      updateButtonState(pending.element, pending.action);
-    } else if (error) {
-      showNotification(error);
-    }
-  });
-
-  document.addEventListener('jsonspot-check-response', () => {
-    const el = document.querySelector('[data-jsonspot-check-response]');
-    if (!el) return;
-
-    let data;
-    try {
-      data = JSON.parse(el.dataset.jsonspotCheckResponse);
-    } catch {
-      return;
-    }
-    delete el.dataset.jsonspotCheckResponse;
-
-    const { requestId, isJSON } = data;
-    const pending = pendingRequests.get(requestId);
-    if (!pending) return;
-    pendingRequests.delete(requestId);
-
-    if (pending.callback) {
-      pending.callback(isJSON);
+      if (pending.callback) {
+        pending.callback(isJSON);
+      }
     }
   });
 

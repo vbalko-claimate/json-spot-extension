@@ -18,13 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Action buttons section in popup for Highlight and Pick features
 
 ### Fixed
-- Page script bridge: `CustomEvent.detail` is `null` when crossing MAIN/ISOLATED world boundary in Chrome MV3 — replaced with `data-*` attribute communication
+- Page script bridge: neither `CustomEvent.detail` nor `dataset` attributes cross the MAIN/ISOLATED world boundary in Chrome MV3 — replaced with `window.postMessage` communication
 
 ### Changed
 - Popup layout updated with reload notice banner and action buttons section
 - Notification system now supports success (green) and error (red) types
 - Content script message listener accepts sendResponse for new message types
-- Page script bridge now uses `dataset` attributes instead of `CustomEvent.detail` for cross-world data passing
+- Page script bridge now uses `window.postMessage` instead of `CustomEvent.detail` for cross-world data passing
 
 ## [0.4.1] - 2026-02-06
 
