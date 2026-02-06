@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-06
+
+### Added
+- Page reload detection: popup shows notice when content script isn't injected, with one-click reload button
+- Highlight JSON: button in popup temporarily highlights all detected JSON elements with green glow animation (3s fade)
+- Element picker: "Pick Element" activates DevTools-like inspector mode — hover to highlight, click to format JSON
+- Element picker supports arbitrary elements (`<pre>`, `<code>`, `<div>`) beyond standard textareas/editors
+- Success notification variant (green) for positive feedback from picker actions
+- Action buttons section in popup for Highlight and Pick features
+
+### Changed
+- Popup layout updated with reload notice banner and action buttons section
+- Notification system now supports success (green) and error (red) types
+- Content script message listener accepts sendResponse for new message types
+
 ## [0.4.1] - 2026-02-06
 
 ### Fixed

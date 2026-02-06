@@ -36,6 +36,10 @@
   let inputDebounceTimers = new WeakMap();
   const dismissedElements = new WeakSet();
   const trackedTextareas = new WeakSet();
+  let pickerActive = false;
+  let pickerOverlay = null;
+  let pickerHighlight = null;
+  let pickerCurrentElement = null;
 
   // ── Focus Tracking ─────────────────────────────────────
   document.addEventListener('focusin', (e) => {
@@ -338,6 +342,56 @@
         white-space: nowrap;
         line-height: 1.4;
       }
+      .jsonspot-notification.success {
+        background: #4CAF50;
+      }
+      .jsonspot-picker-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: auto;
+        cursor: crosshair;
+        z-index: 2147483647;
+        background: rgba(76, 175, 80, 0.03);
+      }
+      .jsonspot-picker-highlight {
+        position: fixed;
+        pointer-events: none;
+        border: 2px solid #4CAF50;
+        background: rgba(76, 175, 80, 0.1);
+        border-radius: 2px;
+        z-index: 2147483647;
+        transition: top 0.05s, left 0.05s, width 0.05s, height 0.05s;
+      }
+      .jsonspot-picker-label {
+        position: fixed;
+        pointer-events: none;
+        background: #4CAF50;
+        color: #fff;
+        font-size: 11px;
+        font-family: system-ui, -apple-system, sans-serif;
+        padding: 2px 6px;
+        border-radius: 2px;
+        z-index: 2147483647;
+        white-space: nowrap;
+      }
+      .jsonspot-picker-hint {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        pointer-events: none;
+        background: rgba(0,0,0,0.8);
+        color: #fff;
+        font-size: 13px;
+        font-family: system-ui, -apple-system, sans-serif;
+        padding: 8px 16px;
+        border-radius: 8px;
+        z-index: 2147483647;
+        white-space: nowrap;
+      }
     `;
     shadowRoot.appendChild(style);
   }
@@ -441,10 +495,10 @@
     }
   }
 
-  function showNotification(message) {
+  function showNotification(message, type = 'error') {
     if (!shadowRoot) return;
     const note = document.createElement('div');
-    note.className = 'jsonspot-notification';
+    note.className = 'jsonspot-notification' + (type === 'success' ? ' success' : '');
     note.textContent = message;
     note.style.top = '10px';
     note.style.right = '10px';
@@ -600,8 +654,284 @@
     }
   }
 
+  // ── Highlight Animation ─────────────────────────────────
+  const HIGHLIGHT_DURATION_MS = 3000;
+
+  function collectJSONElements() {
+    const results = [];
+
+    // Textareas (skip editor-internal)
+    document.querySelectorAll('textarea').forEach(el => {
+      if (el.classList.contains('ace_text-input')) return;
+      if (findParentEditor(el)) return;
+      if (isLikelyJSON(el.value)) results.push(el);
+    });
+
+    // Contenteditable
+    document.querySelectorAll('[contenteditable="true"]').forEach(el => {
+      if (isLikelyJSON(el.textContent)) results.push(el);
+    });
+
+    // Code editors (counted by presence — same heuristic as badge)
+    document.querySelectorAll('.CodeMirror, .cm-editor, .monaco-editor, .ace_editor').forEach(el => {
+      results.push(el);
+    });
+
+    return results;
+  }
+
+  function highlightJSONElements() {
+    const elements = collectJSONElements();
+    elements.forEach((el, i) => applyHighlight(el, i === 0));
+    return elements.length;
+  }
+
+  function applyHighlight(el, scrollTo = false) {
+    const origOutline = el.style.outline;
+    const origBoxShadow = el.style.boxShadow;
+    const origTransition = el.style.transition;
+
+    el.style.transition = 'outline-color 0.3s, box-shadow 0.3s';
+    el.style.outline = '2px solid #4CAF50';
+    el.style.boxShadow = '0 0 8px rgba(76, 175, 80, 0.5)';
+
+    if (scrollTo) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // Fade out and restore
+    setTimeout(() => {
+      el.style.outline = '2px solid transparent';
+      el.style.boxShadow = 'none';
+      setTimeout(() => {
+        el.style.outline = origOutline;
+        el.style.boxShadow = origBoxShadow;
+        el.style.transition = origTransition;
+      }, 300);
+    }, HIGHLIGHT_DURATION_MS);
+  }
+
+  // ── Picker Mode ────────────────────────────────────────
+
+  function startPickerMode() {
+    if (pickerActive) return;
+    pickerActive = true;
+
+    if (!shadowRoot) initFloatingButton();
+
+    // Create overlay to capture all mouse events
+    pickerOverlay = document.createElement('div');
+    pickerOverlay.className = 'jsonspot-picker-overlay';
+    shadowRoot.appendChild(pickerOverlay);
+
+    // Create highlight box (invisible until hover)
+    pickerHighlight = document.createElement('div');
+    pickerHighlight.className = 'jsonspot-picker-highlight';
+    pickerHighlight.style.display = 'none';
+    shadowRoot.appendChild(pickerHighlight);
+
+    // Create label (shows element tag/type)
+    const pickerLabel = document.createElement('div');
+    pickerLabel.className = 'jsonspot-picker-label';
+    pickerLabel.style.display = 'none';
+    shadowRoot.appendChild(pickerLabel);
+
+    // Create hint bar at bottom
+    const pickerHint = document.createElement('div');
+    pickerHint.className = 'jsonspot-picker-hint';
+    pickerHint.textContent = 'Click an element containing JSON \u00b7 Esc to cancel';
+    shadowRoot.appendChild(pickerHint);
+
+    // Mousemove: find element under cursor, highlight it
+    pickerOverlay.addEventListener('mousemove', (e) => {
+      // Temporarily hide overlay to get element beneath it
+      pickerOverlay.style.pointerEvents = 'none';
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      pickerOverlay.style.pointerEvents = 'auto';
+
+      if (!el || el === shadowHost || shadowHost.contains(el)) {
+        pickerHighlight.style.display = 'none';
+        pickerLabel.style.display = 'none';
+        pickerCurrentElement = null;
+        return;
+      }
+
+      // Walk up to find a meaningful target
+      const target = findPickerTarget(el);
+      pickerCurrentElement = target;
+
+      const rect = target.getBoundingClientRect();
+      pickerHighlight.style.display = 'block';
+      pickerHighlight.style.top = rect.top + 'px';
+      pickerHighlight.style.left = rect.left + 'px';
+      pickerHighlight.style.width = rect.width + 'px';
+      pickerHighlight.style.height = rect.height + 'px';
+
+      // Show label
+      pickerLabel.style.display = 'block';
+      pickerLabel.textContent = describeElement(target);
+      pickerLabel.style.top = Math.max(0, rect.top - 20) + 'px';
+      pickerLabel.style.left = rect.left + 'px';
+    });
+
+    // Click: select the element
+    pickerOverlay.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (pickerCurrentElement) {
+        handlePickedElement(pickerCurrentElement);
+      }
+      stopPickerMode();
+    });
+
+    // Escape key: cancel
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        stopPickerMode();
+      }
+    };
+    document.addEventListener('keydown', escHandler, true);
+
+    // Store escHandler reference for cleanup
+    pickerOverlay._escHandler = escHandler;
+  }
+
+  function stopPickerMode() {
+    if (!pickerActive) return;
+    pickerActive = false;
+
+    if (pickerOverlay && pickerOverlay._escHandler) {
+      document.removeEventListener('keydown', pickerOverlay._escHandler, true);
+    }
+
+    // Remove all picker UI elements from shadow root
+    shadowRoot.querySelectorAll(
+      '.jsonspot-picker-overlay, .jsonspot-picker-highlight, .jsonspot-picker-label, .jsonspot-picker-hint'
+    ).forEach(el => el.remove());
+
+    pickerOverlay = null;
+    pickerHighlight = null;
+    pickerCurrentElement = null;
+  }
+
+  function findPickerTarget(el) {
+    // Priority 1: Check if element is inside a code editor
+    const editor = findParentEditor(el);
+    if (editor) return editor;
+
+    // Priority 2: Check if element is a textarea
+    if (el.tagName === 'TEXTAREA') return el;
+
+    // Priority 3: Check if element is or is inside contenteditable
+    let current = el;
+    while (current && current !== document.body) {
+      if (current.isContentEditable && current.getAttribute('contenteditable') === 'true') {
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    // Priority 4: Walk up to find a text-bearing element with JSON-like content
+    current = el;
+    while (current && current !== document.body) {
+      const text = current.textContent?.trim();
+      if (text && text.length > 1 && text.length < JSON_SIZE_LIMIT) {
+        const firstChar = text[0];
+        if (firstChar === '{' || firstChar === '[') {
+          return current;
+        }
+      }
+      current = current.parentElement;
+    }
+
+    // Fallback: return the original element
+    return el;
+  }
+
+  function describeElement(el) {
+    const tag = el.tagName.toLowerCase();
+    const editorEl = findParentEditor(el) || el;
+    const type = getElementType(editorEl);
+    if (type && type !== 'textarea' && type !== 'contenteditable') {
+      const names = {
+        codemirror5: 'CodeMirror 5',
+        codemirror6: 'CodeMirror 6',
+        monaco: 'Monaco Editor',
+        ace: 'Ace Editor'
+      };
+      return names[type] || tag;
+    }
+    if (el.tagName === 'TEXTAREA') return 'textarea';
+    if (el.isContentEditable) return 'contenteditable';
+    if (el.id) return `${tag}#${el.id}`;
+    if (el.className && typeof el.className === 'string') {
+      const first = el.className.trim().split(/\s+/)[0];
+      if (first) return `${tag}.${first}`;
+    }
+    return tag;
+  }
+
+  function handlePickedElement(el) {
+    // Case 1: Code editor
+    const editor = findParentEditor(el);
+    if (editor) {
+      handleEditorViaPageScript(editor, 'format');
+      return;
+    }
+
+    // Case 2: Textarea
+    if (el.tagName === 'TEXTAREA') {
+      if (handleTextarea(el, 'format')) {
+        showNotification('JSON formatted', 'success');
+      } else {
+        showNotification('No valid JSON found in this element');
+      }
+      return;
+    }
+
+    // Case 3: Contenteditable
+    if (el.isContentEditable) {
+      if (handleContentEditable(el, 'format')) {
+        showNotification('JSON formatted', 'success');
+      } else {
+        showNotification('No valid JSON found in this element');
+      }
+      return;
+    }
+
+    // Case 4: Arbitrary element (<pre>, <code>, <div>, etc.)
+    const text = el.textContent;
+    if (text && isLikelyJSON(text)) {
+      const formatted = processJSON(text, 'format');
+      if (formatted !== null) {
+        el.textContent = formatted;
+        showNotification('JSON formatted', 'success');
+        return;
+      }
+    }
+
+    showNotification('No valid JSON found in this element');
+  }
+
   // ── Message Listener ───────────────────────────────────
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'JSONSPOT_PING') {
+      sendResponse({ alive: true });
+      return;
+    }
+    if (message.type === 'JSONSPOT_HIGHLIGHT') {
+      const count = highlightJSONElements();
+      sendResponse({ count });
+      return;
+    }
+    if (message.type === 'JSONSPOT_PICKER_START') {
+      startPickerMode();
+      sendResponse({ started: true });
+      return;
+    }
     if (message.type === 'JSONSPOT_CONTEXT_MENU' || message.type === 'JSONSPOT_KEYBOARD_SHORTCUT') {
       handleFormatAction(message.action);
     }
