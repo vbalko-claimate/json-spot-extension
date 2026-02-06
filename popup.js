@@ -8,10 +8,24 @@
   const reloadBtn = document.getElementById('reloadBtn');
   const highlightBtn = document.getElementById('highlightBtn');
   const pickerBtn = document.getElementById('pickerBtn');
+  const rateLink = document.getElementById('rateLink');
 
   // Show version from manifest
   const manifest = chrome.runtime.getManifest();
   versionSpan.textContent = `v${manifest.version}`;
+
+  // Show "Rate us" link after 5+ format actions
+  const STORE_URL = `https://chromewebstore.google.com/detail/${chrome.runtime.id}`;
+  chrome.storage.sync.get({ formatCount: 0 }, ({ formatCount }) => {
+    if (formatCount >= 5) {
+      rateLink.style.display = 'inline';
+      rateLink.href = STORE_URL;
+      rateLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        chrome.tabs.create({ url: STORE_URL });
+      });
+    }
+  });
 
   // Load saved settings
   chrome.storage.sync.get({ indent: 2, autoDetect: true }, (settings) => {

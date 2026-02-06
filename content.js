@@ -707,7 +707,16 @@
     currentContentType = 'json';
   }
 
+  function incrementFormatCount() {
+    try {
+      chrome.storage.sync.get({ formatCount: 0 }, ({ formatCount }) => {
+        chrome.storage.sync.set({ formatCount: formatCount + 1 });
+      });
+    } catch { /* extension context may be invalidated */ }
+  }
+
   function updateButtonState(el, lastAction, contentType) {
+    incrementFormatCount();
     if (currentTargetElement !== el || !currentButton) return;
     if (contentType) currentContentType = contentType;
     const icon = contentTypeIcon(currentContentType);
@@ -1154,6 +1163,7 @@
     if (el.tagName === 'TEXTAREA') {
       const type = handleTextarea(el, 'format');
       if (type) {
+        incrementFormatCount();
         showNotification(`${type.toUpperCase()} formatted`, 'success');
       } else {
         showNotification('No valid JSON or XML found in this element');
@@ -1165,6 +1175,7 @@
     if (el.isContentEditable) {
       const type = handleContentEditable(el, 'format');
       if (type) {
+        incrementFormatCount();
         showNotification(`${type.toUpperCase()} formatted`, 'success');
       } else {
         showNotification('No valid JSON or XML found in this element');
@@ -1176,6 +1187,7 @@
     const text = el.textContent;
     const { result, type } = processContent(text, 'format');
     if (result !== null) {
+      incrementFormatCount();
       injectHighlightStyles(el);
       el.classList.add('jsonspot-highlighted');
       el.innerHTML = type === 'json' ? highlightJSON(result) : highlightXML(result);
