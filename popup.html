@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <img src="icons/icon-32.png" alt="" class="logo">
+    <h1>JSON Spot</h1>
+  </div>
+
+  <div class="section">
+    <label class="section-label">Indentation</label>
+    <div class="radio-group">
+      <label class="radio-option">
+        <input type="radio" name="indent" value="2" checked>
+        <span>2 spaces</span>
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="indent" value="4">
+        <span>4 spaces</span>
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="indent" value="tab">
+        <span>Tab</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="section">
+    <label class="toggle-option">
+      <input type="checkbox" id="autoDetect" checked>
+      <span>Auto-detect JSON (floating button)</span>
+    </label>
+  </div>
+
+  <div class="footer">
+    <span class="version"></span>
+    <span class="shortcut">Alt+Shift+F to format</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -21,3 +21,21 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     });
   }
 });
+
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message.type === 'JSONSPOT_UPDATE_BADGE' && sender.tab) {
+    const count = message.count;
+    const text = count > 0 ? String(count) : '';
+    chrome.action.setBadgeText({ text, tabId: sender.tab.id });
+    chrome.action.setBadgeBackgroundColor({ color: '#4CAF50', tabId: sender.tab.id });
+  }
+});
+
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === 'format-json') {
+    chrome.tabs.sendMessage(tab.id, {
+      type: 'JSONSPOT_KEYBOARD_SHORTCUT',
+      action: 'format'
+    });
+  }
+});

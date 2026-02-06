@@ -5,6 +5,27 @@
   const SCAN_DEBOUNCE_MS = 500;
   const INPUT_DEBOUNCE_MS = 1000;
 
+  // ── Settings Cache ─────────────────────────────────────
+  let cachedSettings = { indent: 2, autoDetect: true };
+
+  chrome.storage.sync.get({ indent: 2, autoDetect: true }, (settings) => {
+    cachedSettings = settings;
+  });
+
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.indent) cachedSettings.indent = changes.indent.newValue;
+    if (changes.autoDetect) {
+      cachedSettings.autoDetect = changes.autoDetect.newValue;
+      if (!cachedSettings.autoDetect) {
+        removeFloatingButton();
+      }
+    }
+  });
+
+  function getIndent() {
+    return cachedSettings.indent || 2;
+  }
+
   let lastFocusedElement = null;
   let shadowHost = null;
   let shadowRoot = null;
@@ -49,7 +70,8 @@
     }
   }
 
-  function processJSON(text, action, indent = 2) {
+  function processJSON(text, action, indent) {
+    if (indent === undefined) indent = getIndent();
     if (!text) return null;
     const clean = text.replace(/^\uFEFF/, '').trim();
     try {
@@ -175,7 +197,7 @@
     editorEl.dataset.jsonspotId = requestId;
 
     document.dispatchEvent(new CustomEvent('jsonspot-request', {
-      detail: { requestId, editorType, action, indent: 2 }
+      detail: { requestId, editorType, action, indent: getIndent() }
     }));
 
     pendingRequests.set(requestId, { element: editorEl, action });
@@ -412,6 +434,7 @@
   // ── Auto-Detection & Scanning ──────────────────────────
   function scheduleShowButton(el) {
     if (!shadowRoot) return;
+    if (!cachedSettings.autoDetect) return;
     if (dismissedElements.has(el)) return;
 
     const type = getElementType(el);
@@ -468,6 +491,8 @@
         scheduleShowButton(el);
       }
     });
+
+    reportBadgeCount();
   }
 
   function trackTextareaInput(textarea) {
@@ -530,9 +555,29 @@
     });
   }
 
+  // ── Badge Reporting ─────────────────────────────────────
+  function reportBadgeCount() {
+    let count = 0;
+
+    document.querySelectorAll('textarea').forEach(el => {
+      if (isLikelyJSON(el.value)) count++;
+    });
+    document.querySelectorAll('[contenteditable="true"]').forEach(el => {
+      if (isLikelyJSON(el.textContent)) count++;
+    });
+    // Code editors are counted by class presence (we can't synchronously check their content)
+    count += document.querySelectorAll('.CodeMirror, .cm-editor, .monaco-editor, .ace_editor').length;
+
+    try {
+      chrome.runtime.sendMessage({ type: 'JSONSPOT_UPDATE_BADGE', count });
+    } catch {
+      // Extension context may be invalidated
+    }
+  }
+
   // ── Message Listener ───────────────────────────────────
   chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'JSONSPOT_CONTEXT_MENU') {
+    if (message.type === 'JSONSPOT_CONTEXT_MENU' || message.type === 'JSONSPOT_KEYBOARD_SHORTCUT') {
       handleFormatAction(message.action);
     }
   });

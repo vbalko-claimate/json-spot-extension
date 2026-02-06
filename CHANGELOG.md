@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-06
+
+### Added
+- Settings popup: configurable indentation (2 spaces, 4 spaces, tab)
+- Auto-detect toggle in settings (enable/disable floating button)
+- Keyboard shortcut: Alt+Shift+F to format JSON in focused element
+- Badge count showing number of detected JSON elements per tab
+- Settings persistence via chrome.storage.sync
+- Settings live-reload (changes apply immediately without page refresh)
+
 ## [0.3.0] - 2026-02-06
 
 ### Added

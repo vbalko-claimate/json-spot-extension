@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JSON Spot",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Beautify JSON inside textareas, code editors, and contenteditable elements on any webpage.",
   "permissions": [
     "contextMenus",
@@ -25,6 +25,7 @@
     }
   ],
   "action": {
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -37,6 +38,15 @@
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
+  },
+  "commands": {
+    "format-json": {
+      "suggested_key": {
+        "default": "Alt+Shift+F",
+        "mac": "Alt+Shift+F"
+      },
+      "description": "Format JSON in focused element"
+    }
   },
   "web_accessible_resources": [
     {
