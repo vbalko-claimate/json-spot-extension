@@ -40,6 +40,14 @@
   // ── Focus Tracking ─────────────────────────────────────
   document.addEventListener('focusin', (e) => {
     const el = e.target;
+    // Check if this element is inside a code editor FIRST
+    // (e.g. Ace's internal <textarea class="ace_text-input">)
+    const editor = findParentEditor(el);
+    if (editor) {
+      lastFocusedElement = editor;
+      scheduleShowButton(editor);
+      return;
+    }
     if (el.tagName === 'TEXTAREA' || el.isContentEditable) {
       lastFocusedElement = el;
       scheduleShowButton(el);
@@ -157,6 +165,18 @@
 
     if (!el) return;
 
+    console.log('[JSON Spot] handleFormatAction:', action, 'element:', el.tagName, el.className);
+
+    // Check for code editor parent FIRST (before textarea check)
+    // This handles Ace/CM/Monaco internal elements correctly
+    const editorEl = findParentEditor(el);
+    if (editorEl) {
+      console.log('[JSON Spot] Found parent editor:', editorEl.className);
+      handleEditorViaPageScript(editorEl, action);
+      return;
+    }
+
+    // Then check standalone textareas/contenteditable
     if (el.tagName === 'TEXTAREA') {
       if (handleTextarea(el, action)) updateButtonState(el, action);
       return;
@@ -167,20 +187,15 @@
       return;
     }
 
-    const editorEl = findParentEditor(el);
-    if (editorEl) {
-      handleEditorViaPageScript(editorEl, action);
-      return;
-    }
-
-    if (lastFocusedElement) {
-      if (lastFocusedElement.tagName === 'TEXTAREA') {
+    // Fallback to lastFocusedElement
+    if (lastFocusedElement && lastFocusedElement !== el) {
+      const lastEditor = findParentEditor(lastFocusedElement);
+      if (lastEditor) {
+        handleEditorViaPageScript(lastEditor, action);
+      } else if (lastFocusedElement.tagName === 'TEXTAREA') {
         if (handleTextarea(lastFocusedElement, action)) updateButtonState(lastFocusedElement, action);
       } else if (lastFocusedElement.isContentEditable) {
         if (handleContentEditable(lastFocusedElement, action)) updateButtonState(lastFocusedElement, action);
-      } else {
-        const editor = findParentEditor(lastFocusedElement);
-        if (editor) handleEditorViaPageScript(editor, action);
       }
     }
   }
@@ -192,9 +207,13 @@
   function handleEditorViaPageScript(editorEl, action) {
     const requestId = ++requestIdCounter;
     const editorType = getElementType(editorEl);
-    if (!editorType) return;
+    if (!editorType) {
+      console.log('[JSON Spot] No editor type for element:', editorEl.tagName, editorEl.className);
+      return;
+    }
 
     editorEl.dataset.jsonspotId = requestId;
+    console.log('[JSON Spot] Sending request:', { requestId, editorType, action });
 
     document.dispatchEvent(new CustomEvent('jsonspot-request', {
       detail: { requestId, editorType, action, indent: getIndent() }
@@ -204,6 +223,7 @@
     setTimeout(() => {
       if (pendingRequests.has(requestId)) {
         pendingRequests.delete(requestId);
+        console.log('[JSON Spot] Request timed out:', requestId);
         showNotification('Editor not responding');
       }
     }, 3000);
@@ -231,6 +251,7 @@
 
   document.addEventListener('jsonspot-response', (event) => {
     const { requestId, success, error } = event.detail;
+    console.log('[JSON Spot] Response received:', { requestId, success, error });
     const pending = pendingRequests.get(requestId);
     if (!pending) return;
     pendingRequests.delete(requestId);
@@ -462,8 +483,10 @@
   function scanForJSONElements() {
     if (!shadowRoot) return;
 
-    // Scan textareas
+    // Scan textareas (skip editor-internal ones like Ace's ace_text-input)
     document.querySelectorAll('textarea').forEach(el => {
+      if (el.classList.contains('ace_text-input')) return;
+      if (findParentEditor(el)) return;
       trackTextareaInput(el);
       if (dismissedElements.has(el)) return;
       if (isLikelyJSON(el.value)) {
@@ -560,6 +583,8 @@
     let count = 0;
 
     document.querySelectorAll('textarea').forEach(el => {
+      if (el.classList.contains('ace_text-input')) return;
+      if (findParentEditor(el)) return;
       if (isLikelyJSON(el.value)) count++;
     });
     document.querySelectorAll('[contenteditable="true"]').forEach(el => {

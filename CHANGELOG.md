@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-02-06
+
+### Fixed
+- Ace Editor: internal textarea (`ace_text-input`) was captured by focusin handler, causing format action to silently fail on empty `.value`
+- Format action checked textarea before code editor parent, preventing Ace/CodeMirror/Monaco formatting when focus was on internal elements
+- Ace internal textareas no longer counted in badge or scanned for JSON
+
+### Added
+- Debug logging (`[JSON Spot]`) in content script and page script for diagnosing editor bridge issues
+
 ## [0.4.0] - 2026-02-06
 
 ### Added

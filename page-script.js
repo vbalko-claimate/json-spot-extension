@@ -48,7 +48,11 @@
       }
 
       case 'ace':
-        if (el.env && el.env.editor) return el.env.editor.getValue();
+        if (el.env && el.env.editor) {
+          const val = el.env.editor.getValue();
+          console.log('[JSON Spot] Ace getValue length:', val?.length);
+          return val;
+        }
         throw new Error('Ace editor instance not found');
 
       default:
@@ -117,13 +121,17 @@
   // ── Event Listeners ────────────────────────────────────
   document.addEventListener('jsonspot-request', (event) => {
     const { requestId, editorType, action, indent } = event.detail;
+    console.log('[JSON Spot] Request received:', { requestId, editorType, action, indent });
     let result;
 
     try {
       const el = document.querySelector(`[data-jsonspot-id="${requestId}"]`);
       if (!el) throw new Error('Element not found');
+      console.log('[JSON Spot] Found element:', el.tagName, el.className);
       result = handleEditor(el, editorType, action, indent || 2);
+      console.log('[JSON Spot] Result:', result.success ? 'success' : 'failed', result.error || '');
     } catch (err) {
+      console.log('[JSON Spot] Error:', err.message);
       result = { success: false, error: err.message };
     }
 
@@ -134,6 +142,7 @@
 
   document.addEventListener('jsonspot-check', (event) => {
     const { requestId, editorType } = event.detail;
+    console.log('[JSON Spot] Check received:', { requestId, editorType });
     let result;
 
     try {
@@ -141,7 +150,9 @@
       if (!el) throw new Error('Element not found');
       const value = getEditorValue(el, editorType);
       result = { success: true, isJSON: isLikelyJSON(value) };
-    } catch {
+      console.log('[JSON Spot] Check result: isJSON =', result.isJSON, 'valueLength =', value?.length);
+    } catch (err) {
+      console.log('[JSON Spot] Check error:', err.message);
       result = { success: false, isJSON: false };
     }
 
