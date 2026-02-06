@@ -30,6 +30,7 @@
     const editor = findParentEditor(el);
     if (editor) {
       lastFocusedElement = editor;
+      scheduleShowButton(editor);
     }
   }, true);
 
@@ -162,10 +163,73 @@
     }
   }
 
-  // ── Page Script Bridge (stub for v0.3.0) ───────────────
+  // ── Page Script Bridge ──────────────────────────────────
+  let requestIdCounter = 0;
+  const pendingRequests = new Map();
+
   function handleEditorViaPageScript(editorEl, action) {
-    // Will be implemented in v0.3.0
+    const requestId = ++requestIdCounter;
+    const editorType = getElementType(editorEl);
+    if (!editorType) return;
+
+    editorEl.dataset.jsonspotId = requestId;
+
+    document.dispatchEvent(new CustomEvent('jsonspot-request', {
+      detail: { requestId, editorType, action, indent: 2 }
+    }));
+
+    pendingRequests.set(requestId, { element: editorEl, action });
+    setTimeout(() => {
+      if (pendingRequests.has(requestId)) {
+        pendingRequests.delete(requestId);
+        showNotification('Editor not responding');
+      }
+    }, 3000);
   }
+
+  function checkEditorJSON(editorEl, callback) {
+    const requestId = ++requestIdCounter;
+    const editorType = getElementType(editorEl);
+    if (!editorType) { callback(false); return; }
+
+    editorEl.dataset.jsonspotId = requestId;
+
+    document.dispatchEvent(new CustomEvent('jsonspot-check', {
+      detail: { requestId, editorType }
+    }));
+
+    pendingRequests.set(requestId, { callback });
+    setTimeout(() => {
+      if (pendingRequests.has(requestId)) {
+        pendingRequests.delete(requestId);
+        callback(false);
+      }
+    }, 3000);
+  }
+
+  document.addEventListener('jsonspot-response', (event) => {
+    const { requestId, success, error } = event.detail;
+    const pending = pendingRequests.get(requestId);
+    if (!pending) return;
+    pendingRequests.delete(requestId);
+
+    if (success && pending.element) {
+      updateButtonState(pending.element, pending.action);
+    } else if (error) {
+      showNotification(error);
+    }
+  });
+
+  document.addEventListener('jsonspot-check-response', (event) => {
+    const { requestId, isJSON } = event.detail;
+    const pending = pendingRequests.get(requestId);
+    if (!pending) return;
+    pendingRequests.delete(requestId);
+
+    if (pending.callback) {
+      pending.callback(isJSON);
+    }
+  });
 
   // ── Floating Button (Shadow DOM) ───────────────────────
   function initFloatingButton() {
@@ -360,8 +424,16 @@
       } else {
         if (currentTargetElement === el) removeFloatingButton();
       }
+    } else {
+      // Code editor: ask page script to check
+      checkEditorJSON(el, (isJSON) => {
+        if (isJSON) {
+          showFloatingButton(el, type);
+        } else if (currentTargetElement === el) {
+          removeFloatingButton();
+        }
+      });
     }
-    // Editor types will be handled in v0.3.0
   }
 
   function scanForJSONElements() {
@@ -386,6 +458,14 @@
         if (el === lastFocusedElement || el === document.activeElement) {
           showFloatingButton(el, 'contenteditable');
         }
+      }
+    });
+
+    // Scan code editors
+    document.querySelectorAll('.CodeMirror, .cm-editor, .monaco-editor, .ace_editor').forEach(el => {
+      if (dismissedElements.has(el)) return;
+      if (el === lastFocusedElement) {
+        scheduleShowButton(el);
       }
     });
   }

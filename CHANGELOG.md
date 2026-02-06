@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-06
+
+### Added
+- Code editor support: CodeMirror 5, CodeMirror 6, Monaco Editor, Ace Editor
+- Page script bridge (MAIN world) for accessing editor APIs from isolated content script
+- CustomEvent-based communication protocol between content script and page script
+- Editor JSON detection for floating button (async check via page script)
+- Automatic retry with timeout for editor operations
+
 ## [0.2.0] - 2026-02-06
 
 ### Added
