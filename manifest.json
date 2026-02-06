@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JSON Spot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Beautify JSON inside textareas, code editors, and contenteditable elements on any webpage.",
   "permissions": [
     "contextMenus",

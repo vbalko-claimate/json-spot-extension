@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-06
+
+### Added
+- Floating "Format JSON" button auto-appears near focused textareas/contenteditable with JSON
+- Shadow DOM isolation prevents style conflicts with host pages
+- Format/minify toggle: button switches between "Format" and "Minify" after each action
+- Dismissable floating button (per-element, resets on page reload)
+- MutationObserver detects dynamically added elements
+- Scroll and resize repositioning for floating button
+- Input debouncing: re-checks for JSON when user types/pastes in textareas
+- Error notification system (Shadow DOM)
+
 ## [0.1.0] - 2026-02-06
 
 ### Added
