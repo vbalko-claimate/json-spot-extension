@@ -3,6 +3,7 @@
 
   const indentRadios = document.querySelectorAll('input[name="indent"]');
   const autoDetectCheckbox = document.getElementById('autoDetect');
+  const compactCheckbox = document.getElementById('compact');
   const versionSpan = document.querySelector('.version');
   const reloadNotice = document.getElementById('reloadNotice');
   const reloadBtn = document.getElementById('reloadBtn');
@@ -28,12 +29,13 @@
   });
 
   // Load saved settings
-  chrome.storage.sync.get({ indent: 2, autoDetect: true }, (settings) => {
+  chrome.storage.sync.get({ indent: 2, autoDetect: true, compact: true }, (settings) => {
     const indentValue = settings.indent === '\t' ? 'tab' : String(settings.indent);
     indentRadios.forEach(radio => {
       radio.checked = radio.value === indentValue;
     });
     autoDetectCheckbox.checked = settings.autoDetect;
+    compactCheckbox.checked = settings.compact;
   });
 
   // Save on change
@@ -46,6 +48,10 @@
 
   autoDetectCheckbox.addEventListener('change', () => {
     chrome.storage.sync.set({ autoDetect: autoDetectCheckbox.checked });
+  });
+
+  compactCheckbox.addEventListener('change', () => {
+    chrome.storage.sync.set({ compact: compactCheckbox.checked });
   });
 
   // ── Ping content script to check if active ────────────
