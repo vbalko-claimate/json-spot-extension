@@ -6,11 +6,34 @@
 
   const SIZE_LIMIT = 5 * 1024 * 1024;
 
+  // ── Sanitizers ────────────────────────────────────────
+  // NOTE: Keep in sync with content.js
+  const INVISIBLE_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x1A\x7F\uFEFF\u200B\u200C\u200D\uFFFE\uFFFD]/g;
+
+  function sanitizeJSON(text) {
+    if (!text || typeof text !== 'string') return '';
+    let s = text.replace(INVISIBLE_RE, '');
+    s = s.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) =>
+      (m[0] === '"' || m[0] === "'") ? m : ''
+    );
+    s = s.replace(/'((?:[^'\\]|\\.)*)'/g, (_, inner) =>
+      '"' + inner.replace(/\\'/g, "'").replace(/"/g, '\\"') + '"'
+    );
+    s = s.replace(/([{,]\s*)([a-zA-Z_$][\w$]*)\s*:/g, '$1"$2":');
+    s = s.replace(/,\s*([}\]])/g, '$1');
+    return s.trim();
+  }
+
+  function sanitizeXML(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text.replace(INVISIBLE_RE, '').trim();
+  }
+
   // ── JSON Utilities ─────────────────────────────────────
   // NOTE: Detection/formatting functions are duplicated in content.js — keep in sync
   function isLikelyJSON(text) {
     if (!text || typeof text !== 'string') return false;
-    const trimmed = text.replace(/^\uFEFF/, '').trim();
+    const trimmed = sanitizeJSON(text);
     if (trimmed.length === 0 || trimmed.length > SIZE_LIMIT) return false;
     const firstChar = trimmed[0];
     if (firstChar !== '{' && firstChar !== '[') return false;
@@ -34,7 +57,7 @@
 
   function isLikelyXML(text) {
     if (!text || typeof text !== 'string') return false;
-    const trimmed = text.replace(/^\uFEFF/, '').trim();
+    const trimmed = sanitizeXML(text);
     if (trimmed.length === 0 || trimmed.length > SIZE_LIMIT) return false;
     if (trimmed[0] !== '<') return false;
 
@@ -193,11 +216,11 @@
     const value = getEditorValue(el, editorType);
     if (!value) return { success: false, error: 'Empty editor' };
 
-    const clean = value.replace(/^\uFEFF/, '').trim();
-    const contentType = detectContentType(clean);
+    const contentType = detectContentType(value);
 
     if (contentType === 'json') {
       try {
+        const clean = sanitizeJSON(value);
         const parsed = JSON.parse(clean);
         const formatted = action === 'format'
           ? JSON.stringify(parsed, null, indent)
@@ -210,6 +233,7 @@
     }
 
     if (contentType === 'xml') {
+      const clean = sanitizeXML(value);
       const result = action === 'format'
         ? formatXMLString(clean, indent)
         : minifyXMLString(clean);

@@ -6,14 +6,15 @@
   const INPUT_DEBOUNCE_MS = 1000;
 
   // ── Settings Cache ─────────────────────────────────────
-  let cachedSettings = { indent: 2, autoDetect: true };
+  let cachedSettings = { indent: 2, autoDetect: true, compact: true };
 
-  chrome.storage.sync.get({ indent: 2, autoDetect: true }, (settings) => {
+  chrome.storage.sync.get({ indent: 2, autoDetect: true, compact: true }, (settings) => {
     cachedSettings = settings;
   });
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.indent) cachedSettings.indent = changes.indent.newValue;
+    if (changes.compact) cachedSettings.compact = changes.compact.newValue;
     if (changes.autoDetect) {
       cachedSettings.autoDetect = changes.autoDetect.newValue;
       if (!cachedSettings.autoDetect) {
@@ -68,10 +69,37 @@
     }
   }, true);
 
+  // ── Sanitizers ────────────────────────────────────────
+  const INVISIBLE_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x1A\x7F\uFEFF\u200B\u200C\u200D\uFFFE\uFFFD]/g;
+
+  function sanitizeJSON(text) {
+    if (!text || typeof text !== 'string') return '';
+    // 1. Strip control chars and zero-width Unicode
+    let s = text.replace(INVISIBLE_RE, '');
+    // 2. Remove JS-style comments, preserving quoted strings
+    s = s.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) =>
+      (m[0] === '"' || m[0] === "'") ? m : ''
+    );
+    // 3. Single-quoted strings → double-quoted
+    s = s.replace(/'((?:[^'\\]|\\.)*)'/g, (_, inner) =>
+      '"' + inner.replace(/\\'/g, "'").replace(/"/g, '\\"') + '"'
+    );
+    // 4. Unquoted keys → quoted
+    s = s.replace(/([{,]\s*)([a-zA-Z_$][\w$]*)\s*:/g, '$1"$2":');
+    // 5. Trailing commas before } or ]
+    s = s.replace(/,\s*([}\]])/g, '$1');
+    return s.trim();
+  }
+
+  function sanitizeXML(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text.replace(INVISIBLE_RE, '').trim();
+  }
+
   // ── JSON Detection ─────────────────────────────────────
   function isLikelyJSON(text) {
     if (!text || typeof text !== 'string') return false;
-    const trimmed = text.replace(/^\uFEFF/, '').trim();
+    const trimmed = sanitizeJSON(text);
     if (trimmed.length === 0 || trimmed.length > JSON_SIZE_LIMIT) return false;
     const firstChar = trimmed[0];
     if (firstChar !== '{' && firstChar !== '[') return false;
@@ -83,15 +111,48 @@
     }
   }
 
+  function compactStringify(value, indentStr, depth) {
+    if (value === null || typeof value !== 'object') {
+      return JSON.stringify(value);
+    }
+
+    if (Array.isArray(value)) {
+      if (value.length === 0) return '[]';
+      const allSimple = value.every(v => v === null || typeof v !== 'object');
+      if (allSimple) {
+        return '[' + value.map(v => JSON.stringify(v)).join(', ') + ']';
+      }
+      const items = value.map(v =>
+        indentStr.repeat(depth + 1) + compactStringify(v, indentStr, depth + 1)
+      );
+      return '[\n' + items.join(',\n') + '\n' + indentStr.repeat(depth) + ']';
+    }
+
+    const keys = Object.keys(value);
+    if (keys.length === 0) return '{}';
+    const allSimple = keys.every(k => value[k] === null || typeof value[k] !== 'object');
+    if (allSimple) {
+      const pairs = keys.map(k => JSON.stringify(k) + ': ' + JSON.stringify(value[k]));
+      return '{' + pairs.join(', ') + '}';
+    }
+    const pairs = keys.map(k =>
+      indentStr.repeat(depth + 1) + JSON.stringify(k) + ': ' + compactStringify(value[k], indentStr, depth + 1)
+    );
+    return '{\n' + pairs.join(',\n') + '\n' + indentStr.repeat(depth) + '}';
+  }
+
   function processJSON(text, action, indent) {
     if (indent === undefined) indent = getIndent();
     if (!text) return null;
-    const clean = text.replace(/^\uFEFF/, '').trim();
+    const clean = sanitizeJSON(text);
     try {
       const parsed = JSON.parse(clean);
-      return action === 'format'
-        ? JSON.stringify(parsed, null, indent)
-        : JSON.stringify(parsed);
+      if (action !== 'format') return JSON.stringify(parsed);
+      if (cachedSettings.compact) {
+        const indentStr = typeof indent === 'number' ? ' '.repeat(indent) : String(indent);
+        return compactStringify(parsed, indentStr, 0);
+      }
+      return JSON.stringify(parsed, null, indent);
     } catch {
       return null;
     }
@@ -110,7 +171,7 @@
 
   function isLikelyXML(text) {
     if (!text || typeof text !== 'string') return false;
-    const trimmed = text.replace(/^\uFEFF/, '').trim();
+    const trimmed = sanitizeXML(text);
     if (trimmed.length === 0 || trimmed.length > JSON_SIZE_LIMIT) return false;
     if (trimmed[0] !== '<') return false;
 
@@ -138,6 +199,7 @@
 
   function formatXMLString(xml, indent) {
     const indentStr = typeof indent === 'number' ? ' '.repeat(indent) : String(indent);
+    const compact = cachedSettings.compact;
     // Remove existing whitespace between tags
     let stripped = xml.replace(/(>)\s+(<)/g, '$1$2');
     // Tokenize: CDATA, comments, processing instructions, doctype, tags, text
@@ -170,7 +232,18 @@
         // Self-closing tag
         formatted += indentStr.repeat(depth) + token + '\n';
       } else if (token.startsWith('<')) {
-        // Opening tag
+        // Opening tag — check for compact inline pattern: <tag>text</tag>
+        if (compact && i + 2 < tokens.length) {
+          const next = tokens[i + 1];
+          const afterNext = tokens[i + 2];
+          const textContent = next && !next.startsWith('<') ? next.trim() : null;
+          if (textContent && afterNext && afterNext.startsWith('</')) {
+            // Inline: <tag>text</tag>
+            formatted += indentStr.repeat(depth) + token + textContent + afterNext + '\n';
+            i += 2; // skip text + closing tag
+            continue;
+          }
+        }
         formatted += indentStr.repeat(depth) + token + '\n';
         depth++;
       } else {
@@ -187,14 +260,15 @@
   function minifyXMLString(xml) {
     return xml
       .replace(/>\s+</g, '><')
-      .replace(/^\s+|\s+$/g, '')
-      .replace(/\s{2,}/g, ' ');
+      .replace(/\s+</g, '<')
+      .replace(/>\s+/g, '>')
+      .trim();
   }
 
   function processXML(text, action, indent) {
     if (indent === undefined) indent = getIndent();
     if (!text) return null;
-    const clean = text.replace(/^\uFEFF/, '').trim();
+    const clean = sanitizeXML(text);
     // isLikelyXML already validated the content (strict or lenient).
     // Just format/minify the full original content (including doctype).
     return action === 'format'

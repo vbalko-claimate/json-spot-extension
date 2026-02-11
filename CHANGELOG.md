@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-02-11
+
+### Added
+- Lenient JSON parsing: `sanitizeJSON()` fixes trailing commas, single-quoted strings, unquoted keys, JS-style comments (`//` and `/* */`), and strips control/zero-width characters before detection and formatting
+- Lenient XML parsing: `sanitizeXML()` strips control characters (NUL, EOF, BOM) and zero-width Unicode before detection and formatting
+- Sanitizer test suite (`tests/test-sanitizers.js`) covering all lenient parsing cases
+
+### Changed
+- `isLikelyJSON` and `processJSON` now use `sanitizeJSON()` instead of basic BOM-strip
+- `isLikelyXML` and `processXML` now use `sanitizeXML()` instead of basic BOM-strip
+- Page script (`page-script.js`) editor handler sanitizes per content type before parsing
+
 ## [0.7.0] - 2026-02-06
 
 ### Added
